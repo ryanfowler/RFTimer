@@ -30,7 +30,7 @@ public class RFTimer {
     
     //declare RFTimer properties
     var startTime: NSDate?
-    var tagName: String?
+    var tagName: String
     var timer = NSTimer()
     var intervals = 0
     var inTimer = false
@@ -38,43 +38,36 @@ public class RFTimer {
     let notifCenter = NSNotificationCenter.defaultCenter()
     
     /**
-    Start or stop a timer
+    Start the timer
     */
-    public func startOrStop(tag: String) {
+    public func start() {
         
         if !inTimer {
-            if countElements(tag) == 0 {
-                println("You must enter a tag")
-                return
-            }
             startTime = NSDate()
-            delegate?.timerStatusUpdated(self, turnedOn: true)
+            delegate?.timerStatusUpdated(self, isOn: true)
             timer = NSTimer.scheduledTimerWithTimeInterval(0.1, target: self, selector: "timerFireMethod", userInfo: nil, repeats: true)
-            if let err = SD.executeChange("INSERT INTO RFTimerTemp (StartingTime, Tag, Singleton) VALUES (?, ?, 0)", withArgs: [startTime!, tag]) {
+            if let err = SD.executeChange("INSERT INTO RFTimerTemp (StartingTime, Tag, Singleton) VALUES (?, ?, 0)", withArgs: [startTime!, tagName]) {
                 println("Error inserting item to RFTimerTemp")
             }
             intervals = 0
             inTimer = true
-            tagName = tag
             println("Timer started")
-        } else {
+        }
+        
+    }
+    
+    /**
+    Stop the timer and save it in the database
+    */
+    public func stopAndSave() {
+        
+        if inTimer {
             timer.invalidate()
-            delegate?.timerStatusUpdated(self, turnedOn: false)
-            let tableName = SD.escapeIdentifier(tag)
-            
-            //create the new table, if it doesn't exist
-            if let err = SD.executeChange("CREATE TABLE IF NOT EXISTS \(tableName) (ID INTEGER PRIMARY KEY AUTOINCREMENT, StartingTime DATE, EndingTime DATE, Duration INTEGER)") {
-                println("Error attempting to create new tag table in the database")
-            }
-            
-            //create index on Tag column if it does not already exist
-            if let err = SD.executeChange("CREATE INDEX IF NOT EXISTS TagIndex ON \(tableName) (Tag)") {
-                println("Error attempting to create TagIndex on RFTimerEvents table")
-            }
+            delegate?.timerStatusUpdated(self, isOn: false)
             
             //insert the new timer event
-            if let err = SD.executeChange("INSERT INTO \(tableName) (StartingTime, EndingTime, Duration) VALUES (\(SD.escapeValue(startTime!)), \(SD.escapeValue(NSDate())), \(SD.escapeValue(Int(NSDate().timeIntervalSinceDate(startTime!)))))") {
-                println("Error inserting row into RFTimerEvents")
+            if let err = SD.executeChange("INSERT INTO RFTimer (StartingTime, EndingTime, Duration, Tag) VALUES (\(SD.escapeValue(startTime!)), \(SD.escapeValue(NSDate())), \(SD.escapeValue(Int(NSDate().timeIntervalSinceDate(startTime!)))), \(SD.escapeValue(tagName)))") {
+                println("Error inserting row into RFTimer")
             }
             
             //delete the temp timer
@@ -89,16 +82,30 @@ public class RFTimer {
     }
     
     
-    init() {
+    init(tag: String) {
         
-        //create RFTable tables in the database if they do not already exist
+        //create RFTimerTemp table in the database if it does not already exist
         if let err = SD.executeChange("CREATE TABLE IF NOT EXISTS RFTimerTemp (ID INTEGER PRIMARY KEY AUTOINCREMENT, StartingTime DATE, Tag TEXT, Singleton INTEGER UNIQUE)") {
             println("Error attempting to create RFTimerTemp table in the RFTimer database")
         }
         
+        //create RFTimer table in the database if it does not already exist
+        if let err = SD.executeChange("CREATE TABLE IF NOT EXISTS RFTimer (ID INTEGER PRIMARY KEY AUTOINCREMENT, StartingTime DATE, EndingTime DATE, Duration INTEGER, Tag TEXT)") {
+            println("Error attempting to create the RTTimer table in the database")
+        }
+        
+        //create index on Tag column if it does not already exist
+        if let err = SD.executeChange("CREATE INDEX IF NOT EXISTS TagIndex ON RFTimer (Tag)") {
+            println("Error attempting to create TagIndex on the RFTimer table")
+        }
+        
+        //add the tag
+        tagName = tag
+        
         //add self as an observer
         notifCenter.addObserver(self, selector: "wakeTimer", name: UIApplicationDidBecomeActiveNotification, object: nil)
         notifCenter.addObserver(self, selector: "sleepTimer", name: UIApplicationDidEnterBackgroundNotification, object: nil)
+        
         
     }
     
@@ -132,7 +139,7 @@ public class RFTimer {
                         startTime = start
                         tagName = tag
                         delegate?.timerFired(self, seconds: intervals/10 % 60, minutes: intervals/600 % 60, hours: intervals/36000)
-                        delegate?.timerStatusUpdated(self, turnedOn: true)
+                        delegate?.timerStatusUpdated(self, isOn: true)
                         timer = NSTimer.scheduledTimerWithTimeInterval(0.1, target: self, selector: "timerFireMethod", userInfo: nil, repeats: true)
                     }
                 }
@@ -145,6 +152,7 @@ public class RFTimer {
         
         if inTimer {
             println("Timer sent to sleep")
+            delegate?.timerStatusUpdated(self, isOn: true)
             timer.invalidate()
         }
         
@@ -158,15 +166,16 @@ public protocol RFTimerDelegate {
     The timer has fired
     
     Anything that needs to be done when there is a change of time, such as update the UI, should be done in this function.
+    This functions gets called roughly 10 times a second.
     */
     func timerFired(timer: RFTimer, seconds: Int, minutes: Int, hours: Int)
     
     /**
     The timer status has been updated
     
-    Anything that needs to be done when the timer has been turned on or off should be in this function.
+    This function gets called when the timer has been turned on, woken from sleep, turned off, or sent to sleep.
     */
-    func timerStatusUpdated(timer: RFTimer, turnedOn: Bool)
+    func timerStatusUpdated(timer: RFTimer, isOn: Bool)
     
 }
 
