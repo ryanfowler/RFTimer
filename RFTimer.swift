@@ -187,14 +187,14 @@ extension SwiftData {
     :returns:  An array of strings with all existing tags, or nil if there was an error
     */
     public static func getAllTags() -> [String]? {
-        var (results, err) = SD.existingTables()
+        var (results, err) = SD.executeQuery("SELECT DISTINCT Tag FROM RFTimer")
         if err != nil {
             println("Error finding tables")
         } else {
             var tables = [String]()
             for result in results {
-                if result != "sqlite_sequence" && result != "RFTimerTemp" {
-                    tables.append(result)
+                if let tag = result["Tag"]?.asString() {
+                    tables.append(tag)
                 }
             }
             return tables
